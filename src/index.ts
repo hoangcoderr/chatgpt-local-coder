@@ -101,10 +101,16 @@ app.use(express.json({ limit: "50mb" }));
 // khong co token se tra 401 (chong scan tunnel URL / trang web goi vao localhost).
 const MCP_PATHS = MCP_TOKEN ? [`/${MCP_TOKEN}`, `/mcp/${MCP_TOKEN}`] : ["/", "/mcp"];
 const MCP_PATHS_SET = new Set(MCP_PATHS);
+// /health is unauthenticated, and startup output may be collected in logs.
+// Keep the real token only in the route matcher, never in diagnostic output.
+const DISPLAY_MCP_PATHS = MCP_TOKEN
+  ? ["/[REDACTED_MCP_TOKEN]", "/mcp/[REDACTED_MCP_TOKEN]"]
+  : MCP_PATHS;
 
 app.use((req, res, next) => {
   const started = Date.now();
   const isMcpRoute = MCP_PATHS_SET.has(req.path);
+  const displayPath = MCP_TOKEN ? req.path.split(MCP_TOKEN).join("[REDACTED_MCP_TOKEN]") : req.path;
   res.on("finish", () => {
     const duration = Date.now() - started;
     const sessionId = req.headers["mcp-session-id"] as string | undefined;
@@ -128,7 +134,7 @@ app.use((req, res, next) => {
             : `HTTP ${res.statusCode}`);
       logMcpHttpEvent({
         method: req.method,
-        path: req.path,
+        path: displayPath,
         httpStatus: res.statusCode,
         durationMs: duration,
         sessionId,
@@ -138,7 +144,7 @@ app.use((req, res, next) => {
     }
 
     if (!isMcpRoute) {
-      console.log(`[HTTP] ${req.method} ${req.path} ${res.statusCode} ${duration}ms${sessionInfo}`);
+      console.log(`[HTTP] ${req.method} ${displayPath} ${res.statusCode} ${duration}ms${sessionInfo}`);
     }
   });
   next();
@@ -164,7 +170,7 @@ app.get("/health", (_req, res) => {
     fullDiskAccess: getFullDiskAccess(),
     activeSessions: sessionManager.count(),
     sessionRecovery: SESSION_RECOVERY,
-    mcpEndpoints: MCP_PATHS,
+    mcpEndpoints: DISPLAY_MCP_PATHS,
     instructions: summarizeInstructionContext(instructionContext),
   });
 });
@@ -305,8 +311,8 @@ const server = app.listen(PORT, HOST, () => {
   console.log("  Codex MCP Server");
   console.log("========================================");
   console.log(`  Local:     http://${HOST}:${PORT}`);
-  console.log(`  MCP:       http://${HOST}:${PORT}${MCP_PATHS[0]}`);
-  console.log(`  MCP alt:   http://${HOST}:${PORT}${MCP_PATHS[1]}`);
+  console.log(`  MCP:       http://${HOST}:${PORT}${DISPLAY_MCP_PATHS[0]}`);
+  console.log(`  MCP alt:   http://${HOST}:${PORT}${DISPLAY_MCP_PATHS[1]}`);
   console.log(`  Health:    http://${HOST}:${PORT}/health`);
   console.log(`  Admin UI:  http://127.0.0.1:${ADMIN_PORT}/ui`);
   console.log(`  Default cwd: ${workspaceRoot}`);
